@@ -6,6 +6,9 @@ from math import sqrt, sin, cos, acos, degrees, atan2, pi
 from Functions import *
 
 
+k = 0.01720209895
+mu = 1
+
 def itFuncTay(r2Vec, r2Mag, r2DotVec, r2DotMags, rhoMags, times):
     # do time correction
     times = [tCorrection(times[i], rhoMags[i]) for i in range(len(times))]
@@ -22,17 +25,11 @@ def itFuncTay(r2Vec, r2Mag, r2DotVec, r2DotMags, rhoMags, times):
     c2 = -1
     c3 = (-g1) / (f1 * g3 - g1 * f3)
  
-    #calculating rho magnitude; D values should not change much with time, so not re-doing D values; GET CHECKED
-    rhoMag1 = (c1 * D11 + c2 * D12 + c3 * D13) / (c1 * D0)
-    rhoMag2 = (c1 * D21 + c2 * D22 + c3 * D23) / (c2 * D0)
-    rhoMag3 = (c1 * D31 + c2 * D32 + c3 * D33) / (c3 * D0)
-    rhoMags = np.array([rhoMag1, rhoMag2, rhoMag3])
+    #calculating rho magnitude; D values should not change much with time, so not re-doing D values
+    rhoMags = [sum([cs[j]*D[i][j] for j in range(3)])/(cs[i]*D0) for i in range(3)]
     
     # get r1 and r3 position vectors in order to get r2 dot vector
-    rVecs = [rhoMags[i]*rhoHat[i]-RVecs[i]]
-    # r1Vec = rhoMag1 * rhoHat1 - RVec1
-    # r2Vec = rhoMag2 * rhoHat2 - RVec2
-    # r3Vec = rhoMag3 * rhoHat3 - RVec4
+    rVecs = [(rhoMags[i]*rhoHats[i]-RVecs[i]) for i in range(3)]
 
     # get d1 and d3 values
     d1 = (-f3) / (f1 * g3 - f3 * g1)
@@ -48,21 +45,79 @@ def itFuncTay(r2Vec, r2Mag, r2DotVec, r2DotMags, rhoMags, times):
     output = np.array([r2Vec, r2Mags, r2DotVec, r2DotMags, rhoMags, times])
     return output
 
+def OrbElementz(xPos, yPos, zPos, xVel, yVel, zVel):
 
-k = 0.01720209895
-mu = 1
+    answer = 2
+    if answer == 2:
+        t2 = CivToJulian(tH[1], tM[1], tS[1], Year[1], Month[1], Day[1])
+        rhoHat2 = EqToEc(rhoHat(RA2Rad, Dec2Rad))
+    elif answer == 3:
+        t2 = CivToJulian(tH[2], tM[2], tS[2], Year[2], Month[2], Day[2])
+        rhoHat2 = EqToEc(rhoHat(RA3Rad, Dec3Rad))
+    
+    posVec = np.array([xPos, yPos, zPos])
+    posDot = np.dot(posVec, posVec)
+    posMag = np.linalg.norm(posVec)
+    velVec = np.array([xVel, yVel, zVel])
+    velDot = np.dot(velVec, velVec)
+
+    hVec = np.cross(posVec, velVec)
+    hMag = np.linalg.norm(hVec)
+    hx = hVec.item(0)
+    hy = hVec.item(1)
+    hz = hVec.item(2)
+
+    # Calculating orbital element: a
+    a = (2 / np.linalg.norm(posVec) - velDot / mu) ** -1
+
+    # Calculating orbital element: e
+    e = sqrt((1 - (np.linalg.norm(np.cross(posVec, velVec)) ** 2) / (mu * a)))
+    # Calculating orbital element: i
+    i = acos(hz / hMag)
+
+    # Calculating orbital element: Omega
+    sinOmega = hx / (hMag * sin(i))
+    cosOmega = -hy / (hMag * sin(i))
+    Omega = atan2(sinOmega, cosOmega)
+    if Omega < 0:
+        Omega = Omega + 2 * pi
+
+    # Calculating orbital element: omega
+    sinfomega = (zPos / (posMag * sin(i)))
+    cosfomega = (1 / cos(Omega)) * ((xPos / posMag) + cos(i) * (zPos / (posMag * sin(i))) * sin(Omega))
+    fomega = atan2(sinfomega, cosfomega)
+    cosf = (1 / e) * (((a * (1 - e ** 2)) / posMag) - 1)
+    sinf = (1 / e) * sqrt(a * (1 - e ** 2)) * (np.dot(posVec, velVec) / posMag)
+    f = atan2(sinf, cosf)
+    if f < 0:
+        f = f + 2 * pi
+    omega = fomega - f
+    omega = omega % (2 * pi)
+
+    # Calculating orbital element: M
+    E = acos((1 / e) * (1 - posMag / a))
+    M = E - e * sin(E)
+    if f < pi and M > pi:
+        M = (2 * pi) - M
+    elif f > pi and M < pi:
+        M = (2 * pi) - M
+    t0 = CivToJulian(6, 0, 0, 2017, 7, 22)
+    n = sqrt(mu / (a**3))
+    M = M + n * k * (t0 - t2)
+    M = M % (2*pi)
+    return(a, e, degrees(i), degrees(Omega), degrees(omega), degrees(M))
 
 #Importing text file as an array
-data = np.genfromtxt("Inputs.txt", dtype = None)
-times, RARadAr, DecRadAr, Year, Month, Day, RX, RY, RZ = readInput(data)
+data = np.genfromtxt("Inputs.txt", dtype = str)
 
+times, RARadAr, DecRadAr, Year, Month, Day, RX, RY, RZ = readInput(data)
 tH = []
 tM = []
 tS = []
 for i in range(len(times)):
-    tH += times[i][0]
-    tM += times[i][1]
-    tS += times[i][2]
+    tH += [times[i][0]]
+    tM += [times[i][1]]
+    tS += [times[i][2]]
 
 RA1Rad, RA2Rad, RA3Rad, RA4Rad = RARadAr
 Dec1Rad, Dec2Rad, Dec3Rad, Dec4Rad = DecRadAr
@@ -73,7 +128,7 @@ RVec3 = np.array([RX[2], RY[2], RZ[2]])
 RVec4 = np.array([RX[3], RY[3], RZ[3]]) 
 
 observation = input("Observation 2 or observation 3 as center? ")
-assert(observation in [2, 3]) # raise an error if the observation is invalid
+assert(int(observation) in [2, 3]) # raise an error if the observation is invalid
 RVecMid = 0 # initialized in the if statements
 rhoHat2 = 0 # initialized in the if statements
 if observation == 2:
@@ -146,17 +201,10 @@ cs = [c1, c2, c3]
 
 # now calculate values for rho magnitude (scalar equations of range)
 rhoMags = [sum([cs[j]*D[i][j] for j in range(3)])/(cs[i]*D0) for i in range(3)]
-# rhoMag1 = (c1 * D[0][0] + c2 * D[0][1] + c3 * D[0][2]) / (c1 * D0)
-# rhoMag2 = (c1 * D[1][0] + c2 * D[1][1] + c3 * D[1][2]) / (c2 * D0)
-# rhoMag3 = (c1 * D[2][0] + c2 * D[2][1] + c3 * D[2][2]) / (c3 * D0)
-# rhoMags = np.array([rhoMag1, rhoMag2, rhoMag3])
 
 rhoHats = [rhoHat1, rhoHat2, rhoHat3]
 # get r1 and r3 position vectors in order to get r2 dot vector
-r1Vec, r2Vec, r3Vec = [rhoMags[i]*rhoHats[i] - RVecs[i]]
-# r1Vec = rhoMag1 * rhoHat1 - RVec1
-# r2Vec = rhoMag2 * rhoHat2 - RVecMid
-# r3Vec = rhoMag3 * rhoHat3 - RVec4
+r1Vec, r2Vec, r3Vec = [rhoMags[i]*rhoHats[i] - RVecs[i] for i in range(3)]
 
 # get d1 and d3 values
 d1 = (-fT3) / (fT1 * gT3 - fT3 * gT1)
@@ -164,10 +212,8 @@ d3 = fT1 / (fT1 * gT3 - fT3 * gT1)
 
 # get r2 velocity vector and feel like a badass
 r2DotVec = d1 * r1Vec + d3 * r3Vec
-r2DotMags = np.append(r2DotMags, np.linalg.norm(r2DotVec))
+r2DotMags = np.linalg.norm(r2DotVec)
 r2Mag = realRoot
-
-
 
 
 times = np.array([t1, t2, t3])
@@ -178,12 +224,12 @@ while abs(oRho1 - Rho1) > 10**(-4):
     r2Vec, r2Mag, r2DotVec, r2DotMags, rhoMags, times = itFuncTay(r2Vec, r2Mag, r2DotVec, r2DotMags, rhoMags, times)
     Rho1 = rhoMags[0]
 
-xPos, yPos, zPos = r2Vec[0], r2Vec[1], r2Vec[2]
-xVel, yVel, zVel = r2DotVec[0], r2DotVec[1], r2DotVec[2]
+xPos, yPos, zPos = r2Vec
+xVel, yVel, zVel = r2DotVec
 
-print("\nPosition:", r2VecAr)
+print("\nPosition:", r2Vec)
 print("\nVelocity (AU/Day):", r2DotVec * k)
-print("\nRange:", VLA[4][1])
+print("\nRange:", rhoMags[1])
 print("\nORBITAL ELEMENTS!!!!!!!!!!!!!!!!!!!!!", OrbElementz(xPos, yPos, zPos, xVel, yVel, zVel))
 
 
